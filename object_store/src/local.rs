@@ -225,10 +225,11 @@ impl Config {
     }
 
     fn filesystem_to_path(&self, location: &std::path::Path) -> Result<Path> {
-        Ok(Path::from_filesystem_path_with_base(
+        let path_from_fs_with_base = Path::from_filesystem_path_with_base(
             location,
             Some(&self.root),
-        )?)
+        );
+        Ok(path_from_fs_with_base?)
     }
 }
 
@@ -994,7 +995,13 @@ mod tests {
     // macos has some magic in its root '/.VolumeIcon.icns"' which causes this test to fail
     async fn test_list_root() {
         let integration = LocalFileSystem::new();
-        let result = integration.list_with_delimiter(None).await;
+
+
+        let p = Path::from("/tmp/the_test_percent");
+        let prefix = Some(&p);
+
+
+        let result = integration.list_with_delimiter(prefix).await;
         if cfg!(target_family = "windows") {
             let r = result.unwrap_err().to_string();
             assert!(
