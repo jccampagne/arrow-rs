@@ -182,12 +182,18 @@ impl Path {
     ) -> Result<Self, Error> {
         let url = filesystem_path_to_url(path)?;
         let path = match base {
-            Some(prefix) => url.path().strip_prefix(prefix.path()).ok_or_else(|| {
+            Some(prefix) =>
+
+            {
+                let path = &url.path();
+                let strip_prefix = path.strip_prefix(prefix.path());
+                strip_prefix.ok_or_else(|| {
                 Error::PrefixMismatch {
                     path: url.path().to_string(),
                     prefix: prefix.to_string(),
                 }
-            })?,
+            })?
+        },
             None => url.path(),
         };
 
@@ -195,7 +201,7 @@ impl Path {
         let decoded = percent_decode(path.as_bytes())
             .decode_utf8()
             .context(NonUnicodeSnafu { path })?;
-
+/////////// ok here: decoded =  Owned("private/tmp/the_test_percent/%30hi")//////////
         Self::parse(decoded)
     }
 
