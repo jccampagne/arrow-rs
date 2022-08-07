@@ -26,6 +26,7 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::{stream::BoxStream, StreamExt};
+use percent_encoding::percent_decode;
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use std::fs::{metadata, symlink_metadata, File};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -225,17 +226,24 @@ impl LocalFileSystem {
 
 impl Config {
     /// Return filesystem path of the given location
-    fn path_to_filesystem(&self, location: &Path) -> Result<PathBuf> {
+    fn path_to_filesystem(&self, location: &Path) -> Result<std::path::PathBuf> {
         let mut url = self.root.clone();
-        url.path_segments_mut()
-            .expect("url path")
-            // technically not necessary as Path ignores empty segments
-            // but avoids creating paths with "//" which look odd in error messages.
-            .pop_if_empty()
-            .extend(location.parts());
+        let location_parts = location.parts();
+        for a_part in location_parts {
+            println!("========== a_part: {a_part:?}");
+            let part_as_str = a_part.as_ref();
+            let decoded = percent_decode(part_as_str.as_bytes())
+                .decode_utf8()
+                .unwrap()
+                .into_owned();
+            url.path_segments_mut()
+                .expect("url path")
+                .push(decoded.as_str()); // try push
+        }
 
-        url.to_file_path()
-            .map_err(|_| Error::InvalidUrl { url }.into())
+        let filepath = url.to_file_path();
+        println!("path_to_filesystem filepath = {filepath:?}");
+        filepath.map_err(|_| Error::InvalidUrl { url }.into())
     }
 
     fn filesystem_to_path(&self, location: &std::path::Path) -> Result<Path> {
@@ -1246,5 +1254,39 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn filesystem_filename_with_percent() {
+        let temp_dir = TempDir::new().unwrap();
+        let integration = LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap();
+
+        let create_file = |path: &str| -> PathBuf {
+            let file = temp_dir.path().join(path);
+            let file_res = file.clone();
+            std::fs::write(file, path).unwrap();
+            return file_res;
+        };
+        let name = "L%3ABC.parquet";
+        create_file(name);
+
+        // this works with the patch now - note it's list vs list_with_delimeters
+        let res = integration.list(None).await;
+        // res.unwrap();
+
+        let the_list : Vec<_> = res.unwrap().try_collect().await.unwrap();
+        for r in the_list {
+            println!("res = {r:?}");
+        }
+
+
+        let res = integration.list_with_delimiter(None).await;
+        // before the patch, this would fail with:
+        // InvalidPath { source: BadSegment { path: "L%3ABC.parquet", source: InvalidPart { actual: "L%3ABC.parquet", expected: "L:BC.parquet" } } }'
+        // now it fails with:
+        res.unwrap();
+
+
+
     }
 }
